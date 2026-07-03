@@ -15,6 +15,7 @@ tmp/
 # project folders
 downloads/
 logs/
+private/
 
 # i18n translations
 translate.*.toml

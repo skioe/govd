@@ -60,10 +60,97 @@ var (
 	}
 )
 
+func validateMediaURL(raw string, source string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("instagram %s is empty", source)
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("instagram %s is malformed: %w", source, err)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("instagram %s has invalid scheme", source)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("instagram %s has no host", source)
+	}
+	return parsed.String(), nil
+}
+
+func mediaDimensions(d *Dimensions) (width, height int32) {
+	if d != nil {
+		return d.Width, d.Height
+	}
+	return 0, 0
+}
+
+func addGQLVideoFormat(
+	item *models.MediaItem,
+	videoURL string,
+	thumbURL string,
+	dims *Dimensions,
+) error {
+	validatedURL, err := validateMediaURL(videoURL, "GQL video URL")
+	if err != nil {
+		return err
+	}
+	width, height := mediaDimensions(dims)
+	format := &models.MediaFormat{
+		FormatID:   "video",
+		Type:       database.MediaTypeVideo,
+		VideoCodec: database.MediaCodecAvc,
+		AudioCodec: database.MediaCodecAac,
+		URL:        []string{validatedURL},
+		Width:      width,
+		Height:     height,
+	}
+	if strings.TrimSpace(thumbURL) != "" {
+		if validatedThumb, err := validateMediaURL(thumbURL, "GQL video thumbnail URL"); err == nil {
+			format.ThumbnailURL = []string{validatedThumb}
+		}
+	}
+	item.AddFormats(format)
+	return nil
+}
+
+func addGQLImageFormat(item *models.MediaItem, imageURL string, source string) error {
+	validatedURL, err := validateMediaURL(imageURL, source)
+	if err != nil {
+		return err
+	}
+	item.AddFormats(&models.MediaFormat{
+		FormatID: "image",
+		Type:     database.MediaTypePhoto,
+		URL:      []string{validatedURL},
+	})
+	return nil
+}
+
+func mediaHasFormats(media *models.Media) bool {
+	for _, item := range media.Items {
+		if len(item.Formats) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func ParseGQLMedia(ctx *models.ExtractorContext, data *Media) (*models.Media, error) {
+	if data == nil {
+		return nil, fmt.Errorf("instagram GQL media data is nil")
+	}
+	if data.Typename == "" {
+		return nil, fmt.Errorf("instagram GQL media typename is empty")
+	}
+
 	var caption string
 	if data.EdgeMediaToCaption != nil && len(data.EdgeMediaToCaption.Edges) > 0 {
-		caption = data.EdgeMediaToCaption.Edges[0].Node.Text
+		edge := data.EdgeMediaToCaption.Edges[0]
+		if edge != nil && edge.Node != nil {
+			caption = edge.Node.Text
+		}
 	}
 
 	media := ctx.NewMedia()
@@ -72,53 +159,43 @@ func ParseGQLMedia(ctx *models.ExtractorContext, data *Media) (*models.Media, er
 	switch data.Typename {
 	case "GraphVideo", "XDTGraphVideo":
 		item := media.NewItem()
-		item.AddFormats(&models.MediaFormat{
-			FormatID:     "video",
-			Type:         database.MediaTypeVideo,
-			VideoCodec:   database.MediaCodecAvc,
-			AudioCodec:   database.MediaCodecAac,
-			URL:          []string{data.VideoURL},
-			ThumbnailURL: []string{data.DisplayURL},
-			Width:        data.Dimensions.Width,
-			Height:       data.Dimensions.Height,
-		})
+		if err := addGQLVideoFormat(item, data.VideoURL, data.DisplayURL, data.Dimensions); err != nil {
+			return nil, err
+		}
 	case "GraphImage", "XDTGraphImage":
 		item := media.NewItem()
-		item.AddFormats(&models.MediaFormat{
-			FormatID: "image",
-			Type:     database.MediaTypePhoto,
-			URL:      []string{data.DisplayURL},
-		})
+		if err := addGQLImageFormat(item, data.DisplayURL, "GQL image URL"); err != nil {
+			return nil, err
+		}
 	case "GraphSidecar", "XDTGraphSidecar":
-		if data.EdgeSidecarToChildren != nil && len(data.EdgeSidecarToChildren.Edges) > 0 {
-			edges := data.EdgeSidecarToChildren.Edges
-
-			for i := range edges {
-				item := media.NewItem()
-				node := edges[i].Node
-
-				switch node.Typename {
-				case "GraphVideo", "XDTGraphVideo":
-					item.AddFormats(&models.MediaFormat{
-						FormatID:     "video",
-						Type:         database.MediaTypeVideo,
-						VideoCodec:   database.MediaCodecAvc,
-						AudioCodec:   database.MediaCodecAac,
-						URL:          []string{node.VideoURL},
-						ThumbnailURL: []string{node.DisplayURL},
-						Width:        node.Dimensions.Width,
-						Height:       node.Dimensions.Height,
-					})
-
-				case "GraphImage", "XDTGraphImage":
-					item.AddFormats(&models.MediaFormat{
-						FormatID: "image",
-						Type:     database.MediaTypePhoto,
-						URL:      []string{node.DisplayURL},
-					})
+		if data.EdgeSidecarToChildren == nil || len(data.EdgeSidecarToChildren.Edges) == 0 {
+			return nil, fmt.Errorf("instagram GQL sidecar has no children")
+		}
+		for _, edge := range data.EdgeSidecarToChildren.Edges {
+			if edge == nil || edge.Node == nil {
+				return nil, fmt.Errorf("instagram sidecar child node is nil")
+			}
+			node := edge.Node
+			item := media.NewItem()
+			switch node.Typename {
+			case "GraphVideo", "XDTGraphVideo":
+				if err := addGQLVideoFormat(item, node.VideoURL, node.DisplayURL, node.Dimensions); err != nil {
+					return nil, err
 				}
+			case "GraphImage", "XDTGraphImage":
+				if err := addGQLImageFormat(item, node.DisplayURL, "sidecar image URL"); err != nil {
+					return nil, err
+				}
+			default:
+				return nil, fmt.Errorf("instagram sidecar child has unsupported typename: %s", node.Typename)
 			}
 		}
+	default:
+		return nil, fmt.Errorf("instagram unsupported media typename: %s", data.Typename)
+	}
+
+	if !mediaHasFormats(media) {
+		return nil, fmt.Errorf("instagram GQL produced no usable media")
 	}
 
 	return media, nil
@@ -273,7 +350,11 @@ func ParseIGramResponse(body []byte) (*IGramResponse, error) {
 }
 
 func GetCDNURL(contentURL string) (string, error) {
-	parsedURL, err := url.Parse(contentURL)
+	trimmed := strings.TrimSpace(contentURL)
+	if trimmed == "" {
+		return "", fmt.Errorf("igram response contains no CDN uri")
+	}
+	parsedURL, err := url.Parse(trimmed)
 	if err != nil {
 		return "", fmt.Errorf("can't parse igram URL: %w", err)
 	}
@@ -282,7 +363,10 @@ func GetCDNURL(contentURL string) (string, error) {
 		return "", fmt.Errorf("can't unescape igram URL: %w", err)
 	}
 	cdnURL := queryParams.Get("uri")
-	return cdnURL, nil
+	if cdnURL == "" {
+		return "", fmt.Errorf("igram response contains no CDN uri")
+	}
+	return validateMediaURL(cdnURL, "CDN uri")
 }
 
 func GetGQLData(ctx *models.ExtractorContext) (*GraphQLData, error) {
@@ -422,12 +506,12 @@ func BuildGQLData() (map[string]string, map[string]string, error) {
 }
 
 func GetBestCandidate(candidates []*Candidates) *Candidates {
-	if len(candidates) == 0 {
-		return nil
-	}
-	best := candidates[0]
+	var best *Candidates
 	for _, candidate := range candidates {
-		if candidate.Width > best.Width {
+		if candidate == nil {
+			continue
+		}
+		if best == nil || candidate.Width > best.Width {
 			best = candidate
 		}
 	}
@@ -435,12 +519,12 @@ func GetBestCandidate(candidates []*Candidates) *Candidates {
 }
 
 func GetBestVideoVersion(versions []*VideoVersions) *VideoVersions {
-	if len(versions) == 0 {
-		return nil
-	}
-	best := versions[0]
+	var best *VideoVersions
 	for _, version := range versions {
-		if version.Width > best.Width {
+		if version == nil {
+			continue
+		}
+		if best == nil || version.Width > best.Width {
 			best = version
 		}
 	}
