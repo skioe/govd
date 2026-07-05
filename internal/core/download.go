@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/govdbot/govd/internal/database"
@@ -186,6 +187,10 @@ func downloadFormat(
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to download file: %w", err)
+	}
+
+	if info, err := os.Stat(filePath); err == nil {
+		format.FileSize = info.Size()
 	}
 
 	thumbnailFilePath, err = getThumbnail(ctx, format, filePath)

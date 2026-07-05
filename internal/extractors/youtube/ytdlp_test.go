@@ -208,15 +208,6 @@ func TestFormatSelection_PrefersMuxedH264(t *testing.T) {
 		Duration: 60,
 		Formats: []*YtDlpFormat{
 			{
-				FormatID: "248",
-				URL:      "https://example.com/vp9.webm",
-				VCodec:   "vp9",
-				ACodec:   "none",
-				Height:   1080,
-				VBR:      2000,
-				Protocol: "https",
-			},
-			{
 				FormatID: "137",
 				URL:      "https://example.com/video.mp4",
 				VCodec:   "avc1.640028",
@@ -254,6 +245,50 @@ func TestFormatSelection_PrefersMuxedH264(t *testing.T) {
 	audio := item.GetDefaultAudioFormat()
 	if audio == nil || audio.FormatID != "140" {
 		t.Fatalf("expected audio format 140, got %#v", audio)
+	}
+}
+
+func TestFormatSelection_PrefersMuxedOverAdaptive(t *testing.T) {
+	data := &YtDlpResponse{
+		Title:    "Short",
+		Duration: 58,
+		Formats: []*YtDlpFormat{
+			{
+				FormatID: "137",
+				URL:      "https://example.com/video-1080.mp4",
+				VCodec:   "avc1.640028",
+				ACodec:   "none",
+				Height:   1920,
+				FileSize: 13980281,
+				VBR:      3000,
+				Protocol: "https",
+			},
+			{
+				FormatID: "18",
+				URL:      "https://example.com/video-muxed.mp4",
+				VCodec:   "avc1.42001E",
+				ACodec:   "mp4a.40.2",
+				Height:   640,
+				FileSize: 4365090,
+				TBR:      600,
+				Protocol: "https",
+			},
+		},
+	}
+	formats, err := ParseYtDlpFormats(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	item := &models.MediaItem{}
+	item.AddFormats(formats...)
+
+	video := item.GetDefaultVideoFormat()
+	if video == nil || video.FormatID != "18" {
+		t.Fatalf("expected muxed format 18, got %#v", video)
+	}
+	if video.AudioCodec == "" {
+		t.Fatalf("expected muxed format to include audio")
 	}
 }
 

@@ -24,7 +24,7 @@ func loadFromEnv() {
 	parseEnvString("DOWNLOADS_DIR", &Env.DownloadsDirectory, false)
 	parseEnvString("PROXY", &Env.Proxy, false)
 	parseEnvDuration("MAX_DURATION", &Env.MaxDuration, false)
-	parseEnvInt64("MAX_FILE_SIZE", &Env.MaxFileSize, false)
+	parseEnvFileSizeMB("MAX_FILE_SIZE", &Env.MaxFileSize, false)
 	parseEnvString("REPO_URL", &Env.RepoURL, false)
 	parseEnvInt("PROFILER_PORT", &Env.ProfilerPort, false)
 	parseEnvInt("METRICS_PORT", &Env.MetricsPort, false)

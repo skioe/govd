@@ -196,9 +196,15 @@ func (mi *MediaItem) GetDefaultFormat() *MediaFormat {
 }
 
 func (mi *MediaItem) GetDefaultVideoFormat() *MediaFormat {
+	// Prefer muxed H.264 (video+audio in one file) when available.
 	filtered := mi.FilterFormats(func(format *MediaFormat) bool {
-		return format.VideoCodec == database.MediaCodecAvc
+		return format.VideoCodec == database.MediaCodecAvc && format.AudioCodec != ""
 	})
+	if len(filtered) == 0 {
+		filtered = mi.FilterFormats(func(format *MediaFormat) bool {
+			return format.VideoCodec == database.MediaCodecAvc
+		})
+	}
 	if len(filtered) == 0 {
 		filtered = mi.FilterFormats(func(format *MediaFormat) bool {
 			return format.VideoCodec != ""

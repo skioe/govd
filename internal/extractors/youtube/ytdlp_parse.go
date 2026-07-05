@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/govdbot/govd/internal/config"
 	"github.com/govdbot/govd/internal/database"
 	"github.com/govdbot/govd/internal/models"
 )
@@ -87,9 +88,9 @@ func parseYtDlpFormat(
 	}
 
 	bitrate := ytDlpBitrate(f)
-	fileSize := f.FileSize
-	if fileSize == 0 {
-		fileSize = f.FileSizeApprox
+	fileSize := ytDlpFileSize(f)
+	if fileSize > 0 && fileSize > config.Env.MaxFileSize {
+		return nil, false
 	}
 
 	format := &models.MediaFormat{
@@ -186,6 +187,13 @@ func parseYtDlpAudioCodec(codec string) database.MediaCodec {
 	default:
 		return ""
 	}
+}
+
+func ytDlpFileSize(f *YtDlpFormat) int64 {
+	if f.FileSize > 0 {
+		return f.FileSize
+	}
+	return f.FileSizeApprox
 }
 
 func ytDlpBitrate(f *YtDlpFormat) int64 {
