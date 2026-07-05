@@ -55,6 +55,19 @@ func parseEnvInt64(env string, dest *int64, required bool) {
 	}
 }
 
+// parseEnvFileSizeMB parses a size in megabytes and stores it in bytes.
+func parseEnvFileSizeMB(env string, dest *int64, required bool) {
+	if value := os.Getenv(env); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+			*dest = parsed * 1024 * 1024
+		} else {
+			logger.L.Fatalf("%s env is not a valid integer", env)
+		}
+	} else if required {
+		logger.L.Fatalf("%s env is not set", env)
+	}
+}
+
 func parseEnvDuration(env string, dest *time.Duration, required bool) {
 	if value := os.Getenv(env); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil {
