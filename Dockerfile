@@ -39,7 +39,10 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         --repository="https://dl-cdn.alpinelinux.org/alpine/edge/main" \
         --repository="https://dl-cdn.alpinelinux.org/alpine/edge/community" \
         ffmpeg \
-        libheif
+        libheif \
+        yt-dlp \
+        yt-dlp-ejs \
+        yt-dlp-ejs-rt-quickjs
 
 COPY --from=builder /app/govd ./govd
 

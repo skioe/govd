@@ -24,7 +24,7 @@ var Extractor = &models.Extractor{
 	},
 
 	GetFunc: func(ctx *models.ExtractorContext) (*models.ExtractorResponse, error) {
-		video, err := GetVideoFromInv(ctx)
+		video, err := GetVideo(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -34,23 +34,54 @@ var Extractor = &models.Extractor{
 	},
 }
 
-func GetVideoFromInv(ctx *models.ExtractorContext) (*models.Media, error) {
-	if ctx.Config == nil {
-		return nil, fmt.Errorf("youtube not configured")
+func GetVideo(ctx *models.ExtractorContext) (*models.Media, error) {
+	media, err := GetVideoFromYtDlp(ctx)
+	if err == nil {
+		return media, nil
 	}
-	var err error
+	if hasInvidiousConfig(ctx) {
+		invMedia, invErr := GetVideoFromInv(ctx)
+		if invErr == nil {
+			return invMedia, nil
+		}
+	}
+	return nil, err
+}
+
+func hasInvidiousConfig(ctx *models.ExtractorContext) bool {
+	if ctx.Config == nil {
+		return false
+	}
+	for _, instance := range ctx.Config.Instance {
+		if instance != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func GetVideoFromInv(ctx *models.ExtractorContext) (*models.Media, error) {
+	if !hasInvidiousConfig(ctx) {
+		return nil, fmt.Errorf("youtube invidious not configured")
+	}
+	var lastErr error
 	for i := range ctx.Config.Instance {
 		instance, err := GetInvInstance(ctx, i)
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		media, err := GetFromInstance(ctx, instance)
 		if err == nil {
 			return media, nil
 		}
+		lastErr = err
 		ctx.Debugf("invidious instance %s failed: %v", instance, err)
 	}
-	return nil, err
+	if lastErr != nil {
+		return nil, fmt.Errorf("all invidious instances failed: %w", lastErr)
+	}
+	return nil, fmt.Errorf("no invidious instances configured")
 }
 
 func GetFromInstance(ctx *models.ExtractorContext, instance string) (*models.Media, error) {
@@ -95,6 +126,7 @@ func GetFromInstance(ctx *models.ExtractorContext, instance string) (*models.Med
 	}
 
 	media := ctx.NewMedia()
+	media.SetCaption(data.Title)
 	item := media.NewItem()
 	item.AddFormats(formats...)
 
