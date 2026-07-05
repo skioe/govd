@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/bytedance/sonic"
 	"github.com/govdbot/govd/internal/database"
@@ -134,8 +135,10 @@ func GetIGramPost(ctx *models.ExtractorContext) (*models.Media, error) {
 
 	media := ctx.NewMedia()
 	for _, obj := range details.Items {
-		item := media.NewItem()
-		if len(obj.URL) == 0 {
+		if obj == nil {
+			return nil, fmt.Errorf("igram response item is nil")
+		}
+		if len(obj.URL) == 0 || obj.URL[0] == nil {
 			return nil, fmt.Errorf("no media url found")
 		}
 		urlObj := obj.URL[0]
@@ -143,12 +146,15 @@ func GetIGramPost(ctx *models.ExtractorContext) (*models.Media, error) {
 		if err != nil {
 			return nil, err
 		}
-		thumbnailURL, err := GetCDNURL(obj.Thumb)
-		if err != nil {
-			return nil, err
+		var thumbnailURLs []string
+		if strings.TrimSpace(obj.Thumb) != "" {
+			if thumbnailURL, err := GetCDNURL(obj.Thumb); err == nil {
+				thumbnailURLs = []string{thumbnailURL}
+			}
 		}
 		fileExt := urlObj.Ext
 		formatID := urlObj.Type
+		item := media.NewItem()
 		switch fileExt {
 		case "mp4":
 			item.AddFormats(&models.MediaFormat{
@@ -157,7 +163,7 @@ func GetIGramPost(ctx *models.ExtractorContext) (*models.Media, error) {
 				URL:          []string{contentURL},
 				VideoCodec:   database.MediaCodecAvc,
 				AudioCodec:   database.MediaCodecAac,
-				ThumbnailURL: []string{thumbnailURL},
+				ThumbnailURL: thumbnailURLs,
 			},
 			)
 		case "jpg", "png", "webp", "heic", "jpeg":
@@ -188,25 +194,45 @@ func GetIGramStory(ctx *models.ExtractorContext) (*models.Media, error) {
 		return nil, util.ErrUnavailable
 	}
 	result := details.Result[0]
+	if result == nil {
+		return nil, fmt.Errorf("igram story result is nil")
+	}
 	isVideo := len(result.VideoVersions) > 0
 
 	media := ctx.NewMedia()
 	item := media.NewItem()
 	if isVideo {
 		video := GetBestVideoVersion(result.VideoVersions)
+		if video == nil {
+			return nil, fmt.Errorf("instagram story video URL is empty")
+		}
+		videoURL, err := validateMediaURL(video.URL, "story video URL")
+		if err != nil {
+			return nil, err
+		}
 		item.AddFormats(&models.MediaFormat{
 			FormatID:   "video",
 			Type:       database.MediaTypeVideo,
-			URL:        []string{video.URL},
+			URL:        []string{videoURL},
 			VideoCodec: database.MediaCodecAvc,
 			AudioCodec: database.MediaCodecAac,
 		})
 	} else {
+		if result.ImageVersions == nil {
+			return nil, fmt.Errorf("instagram story has no image versions")
+		}
 		image := GetBestCandidate(result.ImageVersions.Candidates)
+		if image == nil {
+			return nil, fmt.Errorf("instagram story image URL is empty")
+		}
+		imageURL, err := validateMediaURL(image.URL, "story image URL")
+		if err != nil {
+			return nil, err
+		}
 		item.AddFormats(&models.MediaFormat{
 			Type:     database.MediaTypePhoto,
 			FormatID: "photo",
-			URL:      []string{image.URL},
+			URL:      []string{imageURL},
 		})
 	}
 

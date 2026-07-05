@@ -1,0 +1,19 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: govd-local:patched
+    ports: []
+
+  db:
+    environment:
+      POSTGRES_DB: ${DB_NAME:-govd}
+      POSTGRES_USER: ${DB_USER:-govd}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-govd} -d ${DB_NAME:-govd}",
+        ]
